@@ -5,6 +5,7 @@ services:
     build: ./mysql
     environment:
       MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: rubis
     ports:
       - "3306:3306"
     command: --max_allowed_packet=32505856 
