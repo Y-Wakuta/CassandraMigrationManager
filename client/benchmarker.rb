@@ -2,12 +2,15 @@ require 'mysql2'
 require 'cassandra'
 
 require_relative './tables'
+require_relative './plans'
+
 
 def get_data_from_mysql
+  record_num = 50
   my_client = Mysql2::Client.new(host: "127.0.0.1", username: "root", password: "root", database: 'rubis')
-  users = my_client.query("SELECT * FROM users LIMIT 50");
-  items = my_client.query("SELECT * FROM items LIMIT 50");
-  return users, items
+  users = my_client.query("SELECT * FROM users LIMIT #{record_num}");
+  items = my_client.query("SELECT * FROM items LIMIT #{record_num}");
+  [users, items]
 end
 
 def setup_cassandra(tables)
@@ -37,60 +40,47 @@ def insert_data(session, datas, tables, name)
   t = tables.find{|t| t.name == name}
   prepared = session.prepare t.insert
   batch = session.batch do |b|
-    if t.name == "users_id" or t.name == "users_rating"
-      datas[:users].to_a.each do |user|
-        b.add(prepared, arguments: [
-            Cassandra::Uuid.new(user['id']),
-            user['firstname'],
-            user['lastname'],
-            user['nickname'],
-            user['password'],
-            user['email'],
-            user['rating'],
-            user['balance'],
-            user['creation_date']
-        ])
-      end
-    elsif t.name == "users_rating_secondary"
-      datas[:users].to_a.each do |user|
-        b.add(prepared, arguments: [
-            user['rating'],
-            Cassandra::Uuid.new(user['id'])
-        ])
-      end
-    elsif t.name == "items_id" or t.name == "items_quantity"
-      datas[:items].to_a.each do |item|
-        b.add prepared, arguments: [
-            Cassandra::Uuid.new(item['id']),
-            item['name'],
-            item['description'],
-            item['initial_price'],
-            item['quantity'],
-            item['reserve_price'],
-            item['buy_now'],
-            item['nb_of_bids'],
-            item['max_bid'],
-            item['start_date'],
-            item['end_date'],
-        ]
-      end
-    elsif t.name == "items_quantity_secondary"
-      datas[:items].to_a.each do |item|
-        b.add prepared, arguments: [
-            item['quantity'],
-            Cassandra::Uuid.new(item['id'])
-        ]
-      end
+    datas[t.entity].to_a.each do |data|
+      b.add(prepared, arguments:
+          t.all_fields.sort_by { |f | f.name}.map do |field|
+            field.name == :id ? Cassandra::Uuid.new(data[field.name.to_s])
+                : data[field.name.to_s]
+          end.to_a
+      )
     end
   end
   session.execute(batch)
+end
+
+def prepare_queries(session)
+  prepareds = {}
+  prepareds[:q_user_id] = session.prepare
+  prepareds[:q_user_rating] = session.prepare
+  prepareds[:q_items_id] =  session.prepare
+  prepareds[:q_items_quantity] = session.prepare
+  prepareds
+end
+
+def setup_steps(tables, session)
+  steps = {}
+  tables.map do |table|
+    prepared = session.prepare table.select
+    steps[query_name] = Proc.new do |params|
+      batch = session.batch do |b|
+        params.to_a.each do |param|
+          b.add prepared, arguments: [param]
+        end
+      end
+      session.execute(batch)
+    end
+  end
 end
 
 table_names = [["users_id", "users_rating_secondary", "items_id", "items_quantity"],
                [ "users_id", "users_rating_secondary", "items_id","items_quantity"],
                [ "users_id", "users_rating", "items_id", "items_quantity_secondary"]]
 
-users, items = get_data_from_mysql()
+users ,items = get_data_from_mysql
 tables = Tables.new.tables
 session = setup_cassandra tables
 
@@ -99,3 +89,15 @@ datas = {
     items: items
 }
 setup_initial_schema(session, datas, tables, table_names)
+
+prepared_queries = prepare_queries(session)
+steps = setup_steps(tables, session)
+
+#user_id_materialized = Plan.new()
+
+p_user_id = TimeDependPlan.new(plans,'SELECT users.* FROM users WHERE users.id = ? -- 8')
+p_user_rating = TimeDependPlan.new(plans,'SELECT users.* FROM users WHERE users.rating = ? -- 8')
+p_items_id = TimeDependPlan.new(plans,'SELECT items.* FROM items WHERE items.id=? -- 13')
+p_items_quantity = TimeDependPlan.new(plans,'SELECT items.* FROM items WHERE items.quantity=? -- 13')
+
+plans.plans << p
