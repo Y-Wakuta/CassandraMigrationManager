@@ -2,25 +2,30 @@ class TimeDependPlan
   attr_accessor :plans, :query
 
   def initialize(plans, query)
-    @plans = plans
+    @plans = []
+    plans.each do |p|
+      @plans << Plan.new(p)
+    end
     @query = query
   end
-end
 
-class Plan
-  attr_accessor :steps
+  class Plan
+    attr_accessor :steps
 
-  def initialize(steps)
-    @steps = steps
-  end
-end
+    def initialize(steps)
+      @steps = steps
+    end
 
-class Step
-  attr_accessor :cf_name, :inner_query
-
-  def initialize(cf_name, inner_query)
-    @cf_name = cf_name
-    @inner_query = inner_query
+    def execute(initial_param, cassandraManager)
+      param = initial_param
+      res = []
+      @steps.map{|step_name| cassandraManager.gen_step(step_name)}.each do |step|
+        tmp = step.call(param)
+        param = tmp
+        res << tmp
+      end
+      res.last # result of last step is required for the query
+    end
   end
 end
 

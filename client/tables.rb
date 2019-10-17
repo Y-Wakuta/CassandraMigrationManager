@@ -64,12 +64,12 @@ class Tables
         fields["items_quantity_secondary"][:partition_keys] << Field.new(:quantity, "INT")
         fields["items_quantity_secondary"][:clustering_keys] << Field.new(:id, "UUID")
 
-        @tables = []
-        @tables << Table.new("users_id", fields, :users)
-        @tables << Table.new("users_rating", fields, :users)
-        @tables << Table.new("users_rating_secondary", fields, :users)
-        @tables << Table.new("items_id", fields, :items)
-        @tables << Table.new("items_quantity", fields, :items)
-        @tables << Table.new("items_quantity_secondary", fields, :items)
+        @tables = {}
+        @tables[:users_id] = Table.new("users_id", fields, :users)
+        @tables[:users_rating] = Table.new("users_rating", fields, :users)
+        @tables[:users_rating_secondary] = Table.new("users_rating_secondary", fields, :users)
+        @tables[:items_id] = Table.new("items_id", fields, :items)
+        @tables[:items_quantity] = Table.new("items_quantity", fields, :items)
+        @tables[:items_quantity_secondary] = Table.new("items_quantity_secondary", fields, :items)
     end
 end

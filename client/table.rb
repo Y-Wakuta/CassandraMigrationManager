@@ -15,9 +15,7 @@ class Table
   end
 
   def gen_select
-    <<-TABLE_CQL
-      SELECT * FROM rubis.#{@name} WHERE #{(@partition_keys + @clustering_keys).sort_by { |f | f.name}.map{|f| "#{f.name.to_s} = ? " }.join("AND ")}
-    TABLE_CQL
+      "SELECT * FROM rubis.#{@name} WHERE #{(@partition_keys + @clustering_keys).sort_by { |f | f.name}.map{|f| "#{f.name.to_s} = ? " }.join("AND ")}"
   end
 
   def gen_insert
