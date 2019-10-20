@@ -17,7 +17,7 @@ class Migrate
     puts "\e[36m to: #{migrate_plan.new_plan.inspect} \e[0m"
     initial_param = migrate_plan.obsolete_plan.first_table.name.start_with?("users") ? initial[:users] : initial[:items]
 
-    obsolete_data = migrate_plan.obsolete_plan.execute(initial_param, cassandraManager)
+    obsolete_data = migrate_plan.obsolete_plan.execute(initial_param)
     migrate_plan.new_plan.steps.each do |table|
       unless cassandraManager.isExist(table)
         cassandraManager.createTable(table)
