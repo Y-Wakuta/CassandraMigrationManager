@@ -2,9 +2,9 @@ class CassandraManager
   def initialize(keyspace_name)
     @keyspace_name = keyspace_name
     cluster = Cassandra.cluster
-    cluster.each_host do |host|
-      puts "Host #{host.ip}: id=#{host.id} datacenter=#{host.datacenter} rack=#{host.rack}"
-    end
+    #cluster.each_host do |host|
+    #  puts "Host #{host.ip}: id=#{host.id} datacenter=#{host.datacenter} rack=#{host.rack}"
+    #end
     @session = cluster.connect(keyspace_name)
     @session.execute("USE #{keyspace_name}")
   end

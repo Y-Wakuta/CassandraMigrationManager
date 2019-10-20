@@ -31,22 +31,19 @@ class Plan
 
   def execute_bench(initial_param)
     cassandraManager = CassandraManager.new('rubis')
-    interval do
-      exec_time = []
+    exec_times = interval do
       res = []
-      Benchmark.bm do |x|
-        param = initial_param
-        exec_time << x.report(""){
-          @steps.map{|step_name| cassandraManager.gen_step(step_name)}.each do |step|
-            tmp = step.call(param)
-            param = tmp
-            res << tmp
-          end
-          res.last # result of last step is required for the query
-        }
+      param = initial_param
+      Benchmark.realtime do
+        @steps.map{|step_name| cassandraManager.gen_step(step_name)}.each do |step|
+          tmp = step.call(param)
+          param = tmp
+          res << tmp
+        end
+        res.last # result of last step is required for the query
       end
-      exec_time
-    end
+    end.flatten(1)
+    {query: @query, exec_time: exec_times}
   end
 
   def execute(initial_param)
@@ -62,7 +59,7 @@ class Plan
   end
 
   def interval
-    interval_in_second = 1.0 / @frequency
+    interval_in_second = 3600 / @frequency
     last = Time.now
     start = last
     res = []
