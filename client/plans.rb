@@ -67,7 +67,7 @@ class Plan
   end
 
   def interval
-    interval_in_second = 3600 / @frequency
+    interval_in_second = 1.0 / @frequency
     last = Time.now
     start = last
     res = []
