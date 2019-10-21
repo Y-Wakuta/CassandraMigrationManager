@@ -1,16 +1,25 @@
 require 'benchmark'
 
 class TimeDependPlan
-  attr_accessor :tables, :plans
+  attr_accessor :plans
 
-  def initialize(tables, query)
+  def initialize(query, tables)
     @plans = []
-    @tables = tables
     @migration_interval = 10
     tables.each_with_index do |t, timestep|
       @plans << Plan.new(t, query, timestep, @migration_interval)
     end
-    @query = query
+  end
+
+  # @param [Array[Array]]
+  # @return [Array]
+  def find_migration
+    migration_plans = []
+    @plans.each_cons(2).each_with_index do |(former_plan, nex_plan), timestep|
+      next if former_plan.steps == nex_plan.steps
+      migration_plans << MigratePlan.new(timestep, former_plan, nex_plan)
+    end
+    migration_plans
   end
 end
 
@@ -33,7 +42,7 @@ class Plan
     cassandraManager = CassandraManager.new('rubis')
     exec_times = interval do
       res = []
-      param = initial_param
+      param = initial_param[@first_table]
       Benchmark.realtime do
         @steps.map{|step_name| cassandraManager.gen_step(step_name)}.each do |step|
           tmp = step.call(param)
@@ -46,10 +55,9 @@ class Plan
     {query: @query, exec_time: exec_times}
   end
 
-  def execute(initial_param)
+  def execute(param)
     cassandraManager = CassandraManager.new('rubis')
     res = []
-    param = initial_param
     @steps.map{|step_name| cassandraManager.gen_step(step_name)}.each do |step|
       tmp = step.call(param)
       param = tmp
