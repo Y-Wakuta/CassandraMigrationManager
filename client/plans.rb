@@ -3,9 +3,9 @@ require 'benchmark'
 class TimeDependPlan
   attr_accessor :plans
 
-  def initialize(query, tables)
+  def initialize(query, tables, migration_interval)
     @plans = []
-    @migration_interval = 10
+    @migration_interval = migration_interval
     tables.each_with_index do |t, timestep|
       @plans << Plan.new(t, query, timestep, @migration_interval)
     end
@@ -21,6 +21,8 @@ class TimeDependPlan
     end
     migration_plans
   end
+
+
 end
 
 class Plan
@@ -55,6 +57,13 @@ class Plan
     {query: @query, exec_time: exec_times}
   end
 
+  def query_initial_condition(repeat)
+    cassandraManager = CassandraManager.new('rubis')
+    initial = {}
+    initial[@first_table] = [cassandraManager.executeQuery("SELECT * FROM #{@first_table.name}").sample(repeat)].flatten(1)
+    initial
+  end
+
   def execute(param)
     cassandraManager = CassandraManager.new('rubis')
     res = []
@@ -71,11 +80,14 @@ class Plan
     last = Time.now
     start = last
     res = []
-    while true and (Time.now - start < @migration_interval - 1)
+    while Time.now - start < (@migration_interval - 1)
       res << yield
       now = Time.now
       _next = [last + interval_in_second, now].max
-      sleep(_next - now)
+      if _next - start > @migration_interval
+        break
+      end
+      sleep([_next - now, 0.01].max)
       last = _next
     end
     res

@@ -2,9 +2,7 @@ class CassandraManager
   def initialize(keyspace_name)
     @keyspace_name = keyspace_name
     cluster = Cassandra.cluster
-    #cluster.each_host do |host|
-    #  puts "Host #{host.ip}: id=#{host.id} datacenter=#{host.datacenter} rack=#{host.rack}"
-    #end
+    #cluster = Cassandra.cluster(hosts: ['cassandra'])
     @session = cluster.connect(keyspace_name)
     @session.execute("USE #{keyspace_name}")
   end
@@ -34,16 +32,18 @@ class CassandraManager
 
   def insert_data(data, table)
     prepared = @session.prepare table.insert
-    batch = @session.batch do |b|
-      data[table.entity].to_a.each do |d|
-        values = table.all_fields.sort_by { |f | f.name}.map do |field|
-          field.name == :id ? Cassandra::Uuid.new(d[field.name.to_s])
-              : d[field.name.to_s]
-        end.to_a
-        b.add(prepared, arguments: values)
+    data[table.entity].to_a.each_slice(500).each do |records|
+      records.each do |r|
+        batch = @session.batch do |b|
+          values = table.all_fields.sort_by { |f | f.name}.map do |field|
+            field.name == :id ? Cassandra::Uuid.new(r[field.name.to_s])
+                : r[field.name.to_s]
+          end.to_a
+          b.add(prepared, arguments: values)
+        end
+        @session.execute(batch)
       end
     end
-    @session.execute(batch)
   end
 
   def insert_by_cf(data, table)
@@ -57,6 +57,14 @@ class CassandraManager
       end
     end
     @session.execute(batch)
+  end
+
+  def initKeyspace(cfs, data)
+    clearKeyspace
+    cfs.each do |cf|
+      createTable(cf)
+      insert_data(data, cf)
+    end
   end
 
   def gen_step(table)

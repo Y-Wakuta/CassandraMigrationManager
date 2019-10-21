@@ -34,4 +34,5 @@ FROM yusukew/ruby2.6.5
 
 ADD . /client
 WORKDIR /client
+RUN gem install bundler
 RUN bundle install

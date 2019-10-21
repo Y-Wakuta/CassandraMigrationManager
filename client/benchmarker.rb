@@ -22,22 +22,14 @@ def output_average(result, timestep)
   end
 end
 
-def exec_benchmark(td_plans, data)
-  interval = 30
-  migration_plans = td_plans.map{|tdp| tdp.find_migration}.flatten!
+def exec_benchmark(td_plans, data, interval, repeat)
   cassandraManager = CassandraManager.new('rubis')
 
-  cassandraManager.clearKeyspace
-  td_plans.map{|tdp| tdp.plans[0].steps}.flatten(1).to_set.each do |cf|
-    cassandraManager.createTable(cf)
-    cassandraManager.insert_data(data, cf)
-  end
+  cassandraManager.initKeyspace(td_plans.map{|tdp| tdp.plans[0].steps}.flatten(1).to_set, data)
 
+  start = Time.now
   (0...td_plans.first.plans.size).each do |timestep|
-    initial = {}
-    td_plans.map{|tdp| tdp.plans[timestep].steps.first}.flatten(1).to_set.each do |table|
-      initial[table] = cassandraManager.executeQuery("SELECT * FROM #{table.name}")
-    end
+    initial = td_plans.map{|tdp| tdp.plans[timestep].query_initial_condition(repeat)}.reduce(Hash.new){|b, n| b.merge!(n)}
 
     workers = td_plans.map{|tdp| Worker.new {|_| tdp.plans[timestep].execute_bench(initial)} }
     workers.map(&:run).each(&:join)
@@ -47,15 +39,22 @@ def exec_benchmark(td_plans, data)
     }
     threads.each(&:join)
 
-    sleep(interval)
-
-    migration_plans.flatten(1).select{|mp| mp.start_timestep == timestep}.each do |mp|
+    migration_plans_this_timestep = td_plans.map{|tdp| tdp.find_migration}
+                                            .flatten
+                                            .select{|mp| mp.start_timestep == timestep}
+    migration_plans_this_timestep.each do |mp|
       Migrate.exec_migration(mp, cassandraManager, initial)
     end
+
+    now = Time.now
+    _next = [start + interval, now].max
+    sleep(_next - now)
+    start = _next
+
     workers.each(&:stop)
 
     plans_for_timestep = td_plans.map{|tdp| tdp.plans[timestep]}
-    migration_plans.flatten(1).select{|mp| mp.start_timestep == timestep}.each do |mp|
+    migration_plans_this_timestep.each do |mp|
       Migrate.drop_obsolete_tables(mp, cassandraManager, plans_for_timestep)
     end
 
@@ -65,20 +64,19 @@ def exec_benchmark(td_plans, data)
   end
 end
 
-record_num = 1000
-
+record_num = 5000
 my_client = Mysql2::Client.new(host: "127.0.0.1", username: "root", password: "root", database: 'rubis')
+#my_client = Mysql2::Client.new(host: "mysql", username: "root", password: "root", database: 'rubis')
 
 data = {}
 data[:users] = my_client.query("SELECT * FROM users LIMIT #{record_num}");
 data[:items] = my_client.query("SELECT * FROM items LIMIT #{record_num}");
 
-
 tables = Tables.new.tables
-q_users_id = {query: 'SELECT users.* FROM users WHERE users.id = ? -- 8', frequency: [0.001, 0.5, 9]}
-q_users_rating = {query: 'SELECT users.* FROM users WHERE users.rating = ? -- 8', frequency:[0.001, 0.5, 9]}
-q_items_id = {query: 'SELECT items.* FROM items WHERE items.id=? -- 13', frequency: [9, 0.5, 0.001]}
-q_items_quantity = {query: 'SELECT items.* FROM items WHERE items.quantity=? -- 13', frequency: [9, 0.5, 0.001]}
+q_users_id = {query: 'SELECT users.* FROM users WHERE users.id = ? -- 8', frequency: [0.1, 50, 900]}
+q_users_rating = {query: 'SELECT users.* FROM users WHERE users.rating = ? -- 8', frequency:[0.1, 50, 900]}
+q_items_id = {query: 'SELECT items.* FROM items WHERE items.id=? -- 13', frequency: [900, 50, 0.1]}
+q_items_quantity = {query: 'SELECT items.* FROM items WHERE items.quantity=? -- 13', frequency: [900, 50, 0.1]}
 
 p_users_id = [
     [:users_id],
@@ -98,7 +96,6 @@ p_users_rating_static = [
     [:users_rating_secondary, :users_id],
 ].map{|tns| tns.map{|tn| tables[tn]}}
 
-
 p_items_id = [
     [:items_id],
     [:items_id],
@@ -117,20 +114,22 @@ p_items_quantity_static = [
     [:items_quantity],
 ].map{|tns| tns.map{|tn| tables[tn]}}
 
+interval = 30
 td_plans_time_depend = []
-td_plans_time_depend << TimeDependPlan.new(q_users_id, p_users_id)
-td_plans_time_depend << TimeDependPlan.new(q_items_id, p_items_id)
-td_plans_time_depend << TimeDependPlan.new(q_users_rating,p_users_rating)
-td_plans_time_depend << TimeDependPlan.new(q_items_quantity,p_items_quantity)
+td_plans_time_depend << TimeDependPlan.new(q_users_id, p_users_id, interval)
+td_plans_time_depend << TimeDependPlan.new(q_items_id, p_items_id, interval)
+td_plans_time_depend << TimeDependPlan.new(q_users_rating,p_users_rating, interval)
+td_plans_time_depend << TimeDependPlan.new(q_items_quantity,p_items_quantity, interval)
 
 td_plans_static = []
-td_plans_static << TimeDependPlan.new(q_users_id, p_users_id)
-td_plans_static << TimeDependPlan.new(q_items_id, p_items_id)
-td_plans_static << TimeDependPlan.new(q_users_rating,p_users_rating_static)
-td_plans_static << TimeDependPlan.new(q_items_quantity,p_items_quantity_static)
+td_plans_static << TimeDependPlan.new(q_users_id, p_users_id, interval)
+td_plans_static << TimeDependPlan.new(q_items_id, p_items_id, interval)
+td_plans_static << TimeDependPlan.new(q_users_rating,p_users_rating_static, interval)
+td_plans_static << TimeDependPlan.new(q_items_quantity,p_items_quantity_static, interval)
 
-puts "time depend"
-exec_benchmark(td_plans_time_depend, data)
+puts "\e[36m time depend \e[0m"
+repeat = 1
+exec_benchmark(td_plans_time_depend, data, interval, repeat)
 
-puts "static"
-exec_benchmark(td_plans_static, data)
+puts "\e[36m static \e[0m"
+exec_benchmark(td_plans_static, data, interval, repeat)
